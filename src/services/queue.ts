@@ -119,7 +119,13 @@ export async function listSelectableOpenPlaySessions(
   client: Client,
   branchId: string
 ): Promise<QueueSessionCard[]> {
-  await activateDueSessions(client, branchId);
+  try {
+    await activateDueSessions(client, branchId);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "";
+    // Read-only views (e.g. dashboard) should still list sessions if activation is staff-only.
+    if (message !== "Staff only") throw err;
+  }
 
   const { data, error } = await (client as SupabaseClient)
     .from("open_play_sessions")

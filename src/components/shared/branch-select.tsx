@@ -5,9 +5,8 @@ import { MapPin } from "lucide-react";
 import { toast } from "sonner";
 import { Label } from "@/components/ui/label";
 import { DEMO_BRANCHES } from "@/lib/demo-data";
-import { listBranches } from "@/services/branches";
-import { useAuthStore } from "@/store";
 import type { Branch } from "@/types";
+import { useAuthStore } from "@/store";
 import { cn } from "@/lib/utils";
 
 const selectClassName =
@@ -45,9 +44,19 @@ export function BranchSelect({
 
       setLoading(true);
       try {
-        const { createClient } = await import("@/lib/supabase/client");
-        const supabase = createClient();
-        const rows = await listBranches(supabase);
+        const res = await fetch("/api/branches");
+        const json = (await res.json()) as {
+          data?: Branch[];
+          error?: string;
+        };
+        if (!res.ok) {
+          if (res.status === 401 || res.status === 403) {
+            if (!cancelled) setBranches(branch ? [branch] : []);
+            return;
+          }
+          throw new Error(json.error ?? "Failed to load branches");
+        }
+        const rows = json.data ?? [];
         if (cancelled) return;
         setBranches(rows);
         if (rows.length > 0) {
@@ -55,12 +64,18 @@ export function BranchSelect({
           if (!stillValid) {
             setBranch(rows[0]);
           }
+        } else if (branch?.id) {
+          setBranches([branch]);
         }
       } catch (err) {
-        const message =
-          err instanceof Error ? err.message : "Failed to load branches";
-        toast.error(message);
-        if (!cancelled) setBranches([]);
+        if (branch?.id && branch.name) {
+          if (!cancelled) setBranches([branch]);
+        } else {
+          const message =
+            err instanceof Error ? err.message : "Failed to load branches";
+          toast.error(message);
+          if (!cancelled) setBranches([]);
+        }
       } finally {
         if (!cancelled) setLoading(false);
       }

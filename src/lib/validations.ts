@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ROLES } from "@/lib/constants";
 
 export const loginSchema = z.object({
   email: z.string().email(),
@@ -62,6 +63,31 @@ export const notificationSchema = z.object({
   scheduled_at: z.string().datetime().optional(),
 });
 
+const staffRoleSchema = z.enum(ROLES);
+
+const staffMemberBaseSchema = z.object({
+  email: z.string().email(),
+  full_name: z.string().min(2, "Name is required"),
+  phone: z.string().optional(),
+  admin_role: staffRoleSchema,
+  branch_id: z.string().uuid(),
+});
+
+export const staffMemberCreateSchema = staffMemberBaseSchema.extend({
+  mode: z.literal("create"),
+  password: z.string().min(8, "Password must be at least 8 characters"),
+});
+
+export const staffMemberInviteSchema = staffMemberBaseSchema.extend({
+  mode: z.literal("invite"),
+});
+
+export const staffMemberSchema = z.discriminatedUnion("mode", [
+  staffMemberCreateSchema,
+  staffMemberInviteSchema,
+]);
+
 export type MemberInput = z.infer<typeof memberSchema>;
 export type MembershipPlanInput = z.infer<typeof membershipPlanSchema>;
 export type WalletTopUpInput = z.infer<typeof walletTopUpSchema>;
+export type StaffMemberInput = z.infer<typeof staffMemberSchema>;

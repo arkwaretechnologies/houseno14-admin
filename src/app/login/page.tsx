@@ -16,6 +16,7 @@ import { setDemoCookie, clearDemoCookie } from "@/lib/demo-mode";
 import type { StaffRole } from "@/lib/constants";
 import { APP_DESCRIPTION, ROLE_LABELS } from "@/lib/constants";
 import { BrandMark } from "@/components/shared/brand-mark";
+import { loadStaffSessionFromSupabase } from "@/lib/auth/staff-session";
 
 const DEMO_ROLES: StaffRole[] = [
   "super_admin",
@@ -69,67 +70,22 @@ export default function LoginPage() {
 
       if (error) throw error;
 
-      const { data: profile, error: profileError } = await supabase
-        .from("profiles")
-        .select("*, branch:branches(*)")
-        .eq("id", data.user.id)
-        .single();
+      const session = await loadStaffSessionFromSupabase(
+        supabase,
+        data.user.id,
+        data.user.email ?? ""
+      );
 
-      if (profileError || !profile) {
-        throw new Error("No staff profile found for this account");
+      if (!session) {
+        await supabase.auth.signOut();
+        throw new Error(
+          "No staff profile found for this account. Use a staff login or ask an admin to invite you."
+        );
       }
-
-      if (profile.role !== "staff" && profile.role !== "admin") {
-        throw new Error("This account is not authorized for the admin dashboard");
-      }
-
-      // Prefer fine-grained admin_role (additive migration); fall back from user_role
-      const profileRecord = profile as typeof profile & {
-        admin_role?: StaffRole | null;
-        status?: string | null;
-        last_login_at?: string | null;
-      };
-
-      const mappedRole: StaffRole =
-        profileRecord.admin_role ??
-        (profile.role === "admin" ? "super_admin" : "receptionist");
-
-      const branchRow = Array.isArray(profile.branch)
-        ? profile.branch[0]
-        : profile.branch;
-
-      const mappedBranch = branchRow
-        ? {
-            id: branchRow.id,
-            name: branchRow.name,
-            code: branchRow.slug,
-            address: null,
-            phone: null,
-            email: null,
-            timezone: branchRow.timezone,
-            is_active: true,
-            created_at: branchRow.created_at,
-            updated_at: branchRow.created_at,
-          }
-        : null;
 
       setSession({
-        staff: {
-          id: profile.id,
-          auth_user_id: profile.id,
-          branch_id: profile.branch_id,
-          email: data.user.email ?? "",
-          full_name: profile.full_name ?? "Staff",
-          role: mappedRole,
-          avatar_url: profile.avatar_url,
-          phone: profile.phone,
-          is_active: (profileRecord.status ?? "active") === "active",
-          last_login_at: profileRecord.last_login_at ?? null,
-          created_at: profile.created_at,
-          updated_at: profile.updated_at,
-          branch: mappedBranch,
-        },
-        branch: mappedBranch,
+        staff: session.staff,
+        branch: session.branch,
         isDemoMode: false,
       });
 

@@ -8,6 +8,8 @@ import { useAuthStore, useUIStore } from "@/store";
 import { cn } from "@/lib/utils";
 import { PageSkeleton } from "@/components/shared/loading-skeletons";
 import { setDemoCookie, clearDemoCookie } from "@/lib/demo-mode";
+import { loadStaffSessionFromSupabase } from "@/lib/auth/staff-session";
+import { toast } from "sonner";
 
 export function DashboardShell({
   children,
@@ -22,6 +24,8 @@ export function DashboardShell({
   const staff = useAuthStore((s) => s.staff);
   const isDemoMode = useAuthStore((s) => s.isDemoMode);
   const hasHydrated = useAuthStore((s) => s._hasHydrated);
+  const setSession = useAuthStore((s) => s.setSession);
+  const clearSession = useAuthStore((s) => s.clearSession);
   const { sidebarCollapsed } = useUIStore();
 
   useEffect(() => {
@@ -64,10 +68,65 @@ export function DashboardShell({
 
     if (isDemoMode) {
       setDemoCookie();
-    } else {
-      clearDemoCookie();
+      return;
     }
-  }, [staff, isDemoMode, hasHydrated, router]);
+
+    clearDemoCookie();
+
+    let cancelled = false;
+
+    async function verifyLiveSession() {
+      try {
+        const { createClient } = await import("@/lib/supabase/client");
+        const supabase = createClient();
+        const {
+          data: { user },
+          error,
+        } = await supabase.auth.getUser();
+
+        if (cancelled) return;
+
+        if (error || !user) {
+          clearSession();
+          router.replace("/login");
+          toast.error("Session expired. Please sign in again.");
+          return;
+        }
+
+        const session = await loadStaffSessionFromSupabase(
+          supabase,
+          user.id,
+          user.email ?? ""
+        );
+
+        if (cancelled) return;
+
+        if (!session) {
+          await supabase.auth.signOut();
+          clearSession();
+          router.replace("/login");
+          toast.error("This account is not authorized for the admin dashboard.");
+          return;
+        }
+
+        setSession({
+          staff: session.staff,
+          branch: session.branch,
+          isDemoMode: false,
+        });
+      } catch {
+        if (!cancelled) {
+          toast.error("Could not verify your session. Try signing in again.");
+        }
+      }
+    }
+
+    void verifyLiveSession();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [staff, isDemoMode, hasHydrated, router, setSession, clearSession]);
 
   if (!hasHydrated || !staff) {
     return (

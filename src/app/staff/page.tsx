@@ -1,13 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ColumnDef } from "@tanstack/react-table";
 import { motion } from "framer-motion";
 import { toast } from "sonner";
-import { Shield, Plus, History, MapPin } from "lucide-react";
+import { Shield, Plus, History, MapPin, Loader2 } from "lucide-react";
 import { DashboardShell } from "@/components/layout/dashboard-shell";
 import { PageHeader } from "@/components/shared/page-header";
 import { DataTable } from "@/components/shared/data-table";
+import { AddStaffDialog } from "@/components/staff/add-staff-dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { DEMO_AUDIT, DEMO_STAFF_LIST } from "@/lib/demo-data";
 import { formatDateTime, getInitials } from "@/lib/utils";
 import { ROLE_LABELS, type StaffRole } from "@/lib/constants";
+import { useAuthStore } from "@/store";
 import type { StaffProfile } from "@/types";
 
 const ROLE_VARIANT: Record<StaffRole, "default" | "secondary" | "success" | "warning" | "outline"> = {
@@ -39,7 +41,7 @@ const columns: ColumnDef<StaffProfile, unknown>[] = [
           </Avatar>
           <div>
             <p className="font-medium">{s.full_name}</p>
-            <p className="text-xs text-muted-foreground">{s.email}</p>
+            <p className="text-xs text-muted-foreground">{s.email || "—"}</p>
           </div>
         </div>
       );
@@ -77,13 +79,38 @@ const columns: ColumnDef<StaffProfile, unknown>[] = [
 ];
 
 export default function StaffPage() {
-  const [staff] = useState<StaffProfile[]>(DEMO_STAFF_LIST);
+  const { isDemoMode, branch, role } = useAuthStore();
+  const [staff, setStaff] = useState<StaffProfile[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [dialogOpen, setDialogOpen] = useState(false);
 
-  const handleCreate = () => {
-    toast.success("Staff invitation sent", {
-      description: "The new team member will receive an email to set up their account.",
-    });
-  };
+  const loadStaff = useCallback(async () => {
+    setLoading(true);
+    if (isDemoMode) {
+      setStaff(DEMO_STAFF_LIST);
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const params = branch?.id ? `?branch_id=${encodeURIComponent(branch.id)}` : "";
+      const res = await fetch(`/api/staff${params}`);
+      const json = (await res.json()) as { data?: StaffProfile[]; error?: string };
+      if (!res.ok) throw new Error(json.error ?? "Failed to load staff");
+      setStaff(json.data ?? []);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to load staff");
+      setStaff([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [isDemoMode, branch?.id]);
+
+  useEffect(() => {
+    void loadStaff();
+  }, [loadStaff]);
+
+  const canManageStaff = role === "super_admin" || role === "manager";
 
   return (
     <DashboardShell>
@@ -91,26 +118,44 @@ export default function StaffPage() {
         title="Staff Management"
         description="Manage team access, roles, and permissions across your club."
         actions={
-          <Button onClick={handleCreate}>
-            <Plus className="h-4 w-4" />
-            Add Staff Member
-          </Button>
+          canManageStaff ? (
+            <Button onClick={() => setDialogOpen(true)}>
+              <Plus className="h-4 w-4" />
+              Add Staff Member
+            </Button>
+          ) : null
         }
       />
 
-      <DataTable
-        columns={columns}
-        data={staff}
-        searchKey="full_name"
-        searchPlaceholder="Search staff…"
-        emptyTitle="No staff members"
-        emptyDescription="Invite your first team member to get started."
-        toolbar={
-          <Badge variant="secondary" className="gap-1.5">
-            <Shield className="h-3.5 w-3.5" />
-            {staff.filter((s) => s.is_active).length} active
-          </Badge>
-        }
+      {loading ? (
+        <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground">
+          <Loader2 className="h-5 w-5 animate-spin" />
+          Loading staff…
+        </div>
+      ) : (
+        <DataTable
+          columns={columns}
+          data={staff}
+          searchKey="full_name"
+          searchPlaceholder="Search staff…"
+          emptyTitle="No staff members"
+          emptyDescription="Invite your first team member to get started."
+          toolbar={
+            <Badge variant="secondary" className="gap-1.5">
+              <Shield className="h-3.5 w-3.5" />
+              {staff.filter((s) => s.is_active).length} active
+            </Badge>
+          }
+        />
+      )}
+
+      <AddStaffDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        branchId={branch?.id}
+        actorRole={role}
+        isDemoMode={isDemoMode}
+        onCreated={(member) => setStaff((prev) => [...prev, member])}
       />
 
       <Card className="mt-6">
